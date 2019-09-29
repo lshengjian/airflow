@@ -1,0 +1,7 @@
+cd public
+git init
+git checkout --orphan gh-pages
+git add .
+git commit -m "init project"
+git remote add origin git@github.com:lshengjian/cg-demo.git
+git push origin gh-pages
