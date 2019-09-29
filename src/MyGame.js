@@ -80,18 +80,18 @@ class MyGame {
         let { gl, ext } = this;
         this.textureWidth = gl.drawingBufferWidth >> CONFIG.TEXTURE_DOWNSAMPLE;
         this.textureHeight = gl.drawingBufferHeight >> CONFIG.TEXTURE_DOWNSAMPLE;
-        //gl.viewport(0, 0, this.textureWidth, this.textureHeight);
         
         const texType = ext.halfFloatTexType;
         const rgba = ext.formatRGBA;
         const rg = ext.formatRG;
         const r = ext.formatR;
-        this.velocity = this.createDoubleFBO(rg.internalFormat, rg.format, texType, ext.supportLinearFiltering ? gl.LINEAR : gl.NEAREST);
-        this.density = this.createDoubleFBO(rgba.internalFormat, rgba.format, texType, ext.supportLinearFiltering ? gl.LINEAR : gl.NEAREST);
+        //使用小一点的纹理表示5种物理属性
+        this.velocity = this.createDoubleFBO(rg.internalFormat, rg.format, texType,  gl.NEAREST);//速度 x,y
+        this.density = this.createDoubleFBO(rgba.internalFormat, rgba.format, texType, gl.NEAREST);//浓度
 
-        this.divergence = this.createFBO(r.internalFormat, r.format, texType, gl.NEAREST);
-        this.curl = this.createFBO(r.internalFormat, r.format, texType, gl.NEAREST);
-        this.pressure = this.createDoubleFBO(r.internalFormat, r.format, texType, gl.NEAREST);
+        this.divergence = this.createFBO(r.internalFormat, r.format, texType, gl.NEAREST);//差异度
+        this.curl = this.createFBO(r.internalFormat, r.format, texType, gl.NEAREST);//卷曲度
+        this.pressure = this.createDoubleFBO(r.internalFormat, r.format, texType, gl.NEAREST);//压力
 
     }
 
@@ -101,15 +101,13 @@ class MyGame {
         this.clearProgram = new GLProgram(gl, VertexShader, ClearShader);
         this.displayProgram = new GLProgram(gl, VertexShader, DisplayShader);
         this.splatProgram = new GLProgram(gl, VertexShader, SplatShader);
-        //console.log('not ext.SupportLinearFiltering',!ext.SupportLinearFiltering);
-        //this.advectionProgram = new GLProgram(gl,VertexShader, ext.SupportLinearFiltering ? 
-        //    AdvectionShader : AdvectionManualFilteringShader);
-        this.advectionProgram = new GLProgram(gl, VertexShader, AdvectionManualFilteringShader);
-        this.divergenceProgram = new GLProgram(gl, VertexShader, DivergenceShader);
-        this.curlProgram = new GLProgram(gl, VertexShader, CurlShader);
-        this.vorticityProgram = new GLProgram(gl, VertexShader, VorticityShader);
-        this.pressureProgram = new GLProgram(gl, VertexShader, PressureShader);
-        this.gradienSubtractProgram = new GLProgram(gl, VertexShader, GradientSubtractShader);
+
+        this.advectionProgram = new GLProgram(gl, VertexShader, AdvectionManualFilteringShader);//平流处理
+        this.divergenceProgram = new GLProgram(gl, VertexShader, DivergenceShader);//差异处理
+        this.curlProgram = new GLProgram(gl, VertexShader, CurlShader);//卷曲处理
+        this.vorticityProgram = new GLProgram(gl, VertexShader, VorticityShader);//漩涡处理
+        this.pressureProgram = new GLProgram(gl, VertexShader, PressureShader);//加压处理
+        this.gradienSubtractProgram = new GLProgram(gl, VertexShader, GradientSubtractShader);//扩散处理
 
     }
     constructor() {
@@ -179,21 +177,23 @@ class MyGame {
         let { advectionProgram, curlProgram, vorticityProgram, divergenceProgram,
             clearProgram, pressureProgram, gradienSubtractProgram, displayProgram } = this;
        
-        const dt = Math.min((Date.now() - this.lastTime) / 1000, 0.016);
-        this.lastTime = Date.now();
-        gl.viewport(0, 0, textureWidth, textureHeight);
-        advectionProgram.use();
+        let nowtime=Date.now();
+        const dt = Math.min(( nowtime- this.lastTime) / 1000, 0.016);
+        this.lastTime =nowtime;
+        gl.viewport(0, 0, textureWidth, textureHeight);//   1/4 screen
+
+       
+        advectionProgram.use();//平流处理
         gl.uniform2f(advectionProgram.uniforms.texelSize, 1.0 / textureWidth, 1.0 / textureHeight);
         gl.uniform1i(advectionProgram.uniforms.uVelocity, velocity.read[2]);//[texture, fbo, texId]
         gl.uniform1i(advectionProgram.uniforms.uSource, velocity.read[2]);
         gl.uniform1f(advectionProgram.uniforms.dt, dt);
-        gl.uniform1f(advectionProgram.uniforms.dissipation, CONFIG.VELOCITY_DISSIPATION);
+        gl.uniform1f(advectionProgram.uniforms.dissipation, CONFIG.VELOCITY_DISSIPATION);//速度耗散
         this.blit(velocity.write[1]);
         velocity.swap();
 
-        gl.uniform1i(advectionProgram.uniforms.uVelocity, velocity.read[2]);
         gl.uniform1i(advectionProgram.uniforms.uSource, density.read[2]);
-        gl.uniform1f(advectionProgram.uniforms.dissipation, CONFIG.DENSITY_DISSIPATION);
+        gl.uniform1f(advectionProgram.uniforms.dissipation, CONFIG.DENSITY_DISSIPATION);//浓度耗散
         this.blit(density.write[1]);
         density.swap();
 
@@ -203,12 +203,12 @@ class MyGame {
 
         }
 
-        curlProgram.use();
+        curlProgram.use();//更新弯曲度
         gl.uniform2f(curlProgram.uniforms.texelSize, 1.0 / textureWidth, 1.0 / textureHeight);
         gl.uniform1i(curlProgram.uniforms.uVelocity, velocity.read[2]);
         this.blit(curl[1]);//[texture, fbo, texId]
 
-        vorticityProgram.use();
+        vorticityProgram.use();//漩涡
         gl.uniform2f(vorticityProgram.uniforms.texelSize, 1.0 / textureWidth, 1.0 / textureHeight);
         gl.uniform1i(vorticityProgram.uniforms.uVelocity, velocity.read[2]);
         gl.uniform1i(vorticityProgram.uniforms.uCurl, curl[2]);
@@ -217,7 +217,7 @@ class MyGame {
         this.blit(velocity.write[1]);
         velocity.swap();
 
-        divergenceProgram.use();
+        divergenceProgram.use();//差异处理
         gl.uniform2f(divergenceProgram.uniforms.texelSize, 1.0 / textureWidth, 1.0 / textureHeight);
         gl.uniform1i(divergenceProgram.uniforms.uVelocity, velocity.read[2]);
         this.blit(divergence[1]);
@@ -243,16 +243,17 @@ class MyGame {
             pressure.swap();
         }
 
-        gradienSubtractProgram.use();
+        gradienSubtractProgram.use();//扩散，降低速度
         gl.uniform2f(gradienSubtractProgram.uniforms.texelSize, 1.0 / textureWidth, 1.0 / textureHeight);
         gl.uniform1i(gradienSubtractProgram.uniforms.uPressure, pressure.read[2]);
         gl.uniform1i(gradienSubtractProgram.uniforms.uVelocity, velocity.read[2]);
         this.blit(velocity.write[1]);
         velocity.swap();
 
+        //下面开始绘图
         gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
         displayProgram.use();
-        gl.uniform1i(displayProgram.uniforms.uTexture, density.read[2]);
+        gl.uniform1i(displayProgram.uniforms.uTexture, density.read[2]);//浓度其实代表颜色
         this.blit(null);
         let self = this;
         requestAnimationFrame(self.update.bind(self));
@@ -267,12 +268,12 @@ class MyGame {
         gl.uniform2f(splatProgram.uniforms.point, x / canvas.width, 1.0 - y / canvas.height);
         gl.uniform3f(splatProgram.uniforms.color, dx, -dy, 1.0);
         gl.uniform1f(splatProgram.uniforms.radius, CONFIG.SPLAT_RADIUS);
-        this.blit(velocity.write[1]);//[texture, fbo, texId]
+        this.blit(velocity.write[1]);//记录初始速度
         velocity.swap();
 
         gl.uniform1i(splatProgram.uniforms.uTarget, density.read[2]);
         gl.uniform3f(splatProgram.uniforms.color, color[0] * 0.3, color[1] * 0.3, color[2] * 0.3);
-        this.blit(density.write[1]);
+        this.blit(density.write[1]);//记录初始颜色
         density.swap();
     }
 
